@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>請求書作成フォーム</title>
+  <style>
+    /* ===== リセット & 基本スタイル ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "MS Gothic", "Meiryo", "Yu Gothic", "游ゴシック", sans-serif;
+      font-size: 11pt;
+      background: #e8e8e8;
+      color: #000;
+    }
+
+    /* ===== 編集モード用コントロールパネル ===== */
+    #control-panel {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      background: #1a1a2e;
+      color: #fff;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      z-index: 9999;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      flex-wrap: wrap;
+    }
+    #control-panel h1 {
+      font-size: 14px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      margin-right: auto;
+    }
+    #control-panel button {
+      padding: 7px 18px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: bold;
+      transition: opacity 0.2s;
+    }
+    #control-panel button:hover { opacity: 0.85; }
+    #btn-issue    { background: #e94560; color: #fff; }
+    #btn-print    { background: #0f3460; color: #fff; display:none; }
+    #btn-edit     { background: #16213e; color: #ddd; border: 1px solid #444; display:none; }
+    /* 修正編集ボタン: 発行済み番号を保持したまま編集モードへ */
+    #btn-modify   { background: #b45309; color: #fff; display:none; }
+    /* 修正版PDF出力ボタン: 修正編集後に表示 */
+    #btn-reprint  { background: #065f46; color: #fff; display:none; }
+    /* 修正中バッジ */
+    #modify-badge {
+      font-size: 11px;
+      color: #fde68a;
+      background: #92400e;
+      padding: 4px 10px;
+      border-radius: 4px;
+      display: none;
+    }
+    #invoice-no-display {
+      font-size: 12px;
+      color: #aef;
+      background: rgba(255,255,255,0.08);
+      padding: 5px 12px;
+      border-radius: 4px;
+      display: none;
+    }
+
+    /* ===== A4用紙エリア ===== */
+    .page-wrapper {
+      padding: 56px 20px 40px; /* control-panel の高さ分オフセット */
+    }
+
+    /* ===== 請求書本体 ===== */
+    #invoice {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 0 auto;
+      background: #fff;
+      padding: 14mm 14mm 12mm;
+      position: relative;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+    }
+
+    /* ===== タイトル ===== */
+    .invoice-title {
+      text-align: center;
+      font-size: 18pt;
+      font-weight: bold;
+      letter-spacing: 4px;
+      margin-bottom: 10px;
+    }
+
+    /* ===== 上部2カラム ===== */
+    .header-columns {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .header-left { flex: 1; }
+    .header-right { width: 230px; flex-shrink: 0; font-size: 9.5pt; }
+
+    /* --- 宛先 --- */
+    .addressee-name {
+      font-size: 14pt;
+      font-weight: bold;
+      border-bottom: 2px solid #000;
+      padding-bottom: 2px;
+      margin-bottom: 4px;
+      display: inline-block;
+    }
+    .addressee-detail { font-size: 9pt; margin-bottom: 6px; }
+    .sender-label { font-size: 10pt; margin-top: 4px; }
+
+    /* --- 右カラム: 日付・番号・発行者 --- */
+    .header-right table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+    .header-right table td { padding: 1px 2px; }
+    .header-right table td:first-child { width: 72px; }
+    .company-name { font-size: 12pt; font-weight: bold; margin-bottom: 2px; }
+    .company-detail { font-size: 8.5pt; line-height: 1.6; }
+
+    /* ===== ご請求金額ボックス ===== */
+    .amount-box {
+      border: 1.5px solid #000;
+      margin: 8px 0;
+      width: 200px;
+    }
+    .amount-box .label {
+      background: #f0f0f0;
+      text-align: center;
+      font-size: 9.5pt;
+      border-bottom: 1px solid #000;
+      padding: 2px;
+    }
+    .amount-box .value {
+      text-align: center;
+      font-size: 15pt;
+      font-weight: bold;
+      padding: 4px;
+    }
+
+    /* ===== 振込情報テーブル ===== */
+    .payment-table {
+      border-collapse: collapse;
+      margin-bottom: 8px;
+      font-size: 9.5pt;
+    }
+    .payment-table td {
+      border: 1px solid #000;
+      padding: 3px 6px;
+      vertical-align: top;
+    }
+    .payment-table td:first-child { background: #f0f0f0; white-space: nowrap; }
+
+    /* ===== セクション見出し ===== */
+    .section-title {
+      font-size: 10pt;
+      font-weight: bold;
+      margin: 8px 0 3px;
+    }
+
+    /* ===== 一覧テーブル共通 ===== */
+    .list-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      margin-bottom: 8px;
+    }
+    .list-table th, .list-table td {
+      border: 1px solid #000;
+      padding: 3px 5px;
+      vertical-align: middle;
+    }
+    .list-table th {
+      background: #f0f0f0;
+      text-align: center;
+      font-weight: bold;
+    }
+    .list-table td.right { text-align: right; }
+    .list-table td.center { text-align: center; }
+
+    /* 請求一覧の列幅 */
+    .col-date    { width: 52px; }
+    .col-detail  { /* 残り */ }
+    .col-tax     { width: 44px; }
+    .col-qty     { width: 36px; }
+    .col-price   { width: 78px; }
+    .col-amount  { width: 78px; }
+
+    /* ===== 税率区分 & 合計 ===== */
+    .bottom-tables {
+      display: flex;
+      gap: 0;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .tax-summary-table {
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      width: 58%;
+    }
+    .tax-summary-table th, .tax-summary-table td {
+      border: 1px solid #000;
+      padding: 3px 5px;
+      text-align: center;
+    }
+    .tax-summary-table th { background: #f0f0f0; }
+
+    .total-table {
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      width: 38%;
+    }
+    .total-table td {
+      border: 1px solid #000;
+      padding: 3px 8px;
+    }
+    .total-table td:first-child { background: #f0f0f0; text-align: right; }
+    .total-table td:last-child { text-align: right; font-weight: bold; }
+
+    /* ===== 備考欄 ===== */
+    .note-box {
+      border: 1px solid #000;
+      padding: 6px 8px;
+      font-size: 9.5pt;
+      min-height: 46px;
+    }
+    .note-box .note-label { font-weight: bold; margin-bottom: 2px; text-decoration: underline; }
+
+    /* ===== 入力フォーム スタイル (編集モード) ===== */
+    .editable input, .editable select, .editable textarea {
+      border: 1px dashed #1a73e8;
+      background: #f0f6ff;
+      border-radius: 2px;
+      font-family: inherit;
+      font-size: inherit;
+      padding: 1px 3px;
+      width: 100%;
+      outline: none;
+    }
+    .editable input:focus, .editable select:focus, .editable textarea:focus {
+      border-color: #e94560;
+      background: #fff8f8;
+    }
+    /* 数値入力は右寄せ */
+    .editable input[type="number"] { text-align: right; }
+
+    /* ===== 表示モード (印刷モード) ===== */
+    .view-mode input, .view-mode select, .view-mode textarea {
+      border: none !important;
+      background: transparent !important;
+      pointer-events: none;
+    }
+
+    /* 行追加ボタン */
+    .add-row-btn {
+      background: #0f3460;
+      color: #fff;
+      border: none;
+      padding: 4px 12px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+      margin-bottom: 4px;
+    }
+    .add-row-btn:hover { background: #16213e; }
+    .remove-row-btn {
+      background: #cc3333;
+      color: #fff;
+      border: none;
+      width: 20px; height: 20px;
+      border-radius: 2px;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+    }
+    .remove-row-btn:hover { background: #991111; }
+    .view-mode .add-row-btn,
+    .view-mode .remove-row-btn { display: none !important; }
+
+    /* ===== 印刷スタイル ===== */
+    @media print {
+      body { background: #fff; }
+      #control-panel { display: none !important; }
+      .page-wrapper { padding: 0; }
+      #invoice {
+        box-shadow: none;
+        width: 100%;
+        margin: 0;
+        padding: 12mm 14mm;
+      }
+      .add-row-btn, .remove-row-btn { display: none !important; }
+      input, select, textarea {
+        border: none !important;
+        background: transparent !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== コントロールパネル ===== -->
+<div id="control-panel">
+  <h1>📄 請求書作成フォーム</h1>
+  <span id="invoice-no-display"></span>
+  <button id="btn-issue"   onclick="issueInvoice()">請求書発行</button>
+  <button id="btn-print"   onclick="window.print()">🖨 印刷 / PDF保存</button>
+  <button id="btn-modify"  onclick="switchToModify()">✏️ 修正して再出力</button>
+  <span   id="modify-badge">⚠️ 修正中（番号保持）</span>
+  <button id="btn-reprint" onclick="applyModifyAndPrint()">🖨 修正版を出力</button>
+  <button id="btn-edit"    onclick="switchToEdit()">↩ 新規に戻す</button>
+</div>
+
+<!-- ===== A4ページ ===== -->
+<div class="page-wrapper">
+<div id="invoice" class="editable">
+
+  <!-- タイトル -->
+  <div class="invoice-title">請求書</div>
+
+  <!-- 上部2カラム -->
+  <div class="header-columns">
+
+    <!-- 左: 宛先 -->
+    <div class="header-left">
+      <div class="addressee-name" id="display-addressee">
+        <!-- 編集時: テキスト入力, 表示時: テキスト -->
+        <input type="text" id="addressee" value="央優会レディースクリニック" style="font-size:14pt;font-weight:bold;width:260px;">
+        &nbsp;御中
+      </div>
+      <div class="addressee-detail" style="margin-top:6px;">
+        〒<input type="text" id="dest-zip" value="252-0311" style="width:68px;">&nbsp;
+        <input type="text" id="dest-addr1" value="神奈川県相模原市南区東林間4-9-1" style="width:200px;"><br>
+        <input type="text" id="dest-person" value="金光　良美" style="width:160px;">&nbsp;様
+      </div>
+      <div class="sender-label">下記の通りご請求申し上げます。</div>
+    </div>
+
+    <!-- 右: 日付・番号・発行者 -->
+    <div class="header-right">
+      <table>
+        <tr>
+          <td>日付　　　　：</td>
+          <td><input type="date" id="issue-date" style="width:130px;"></td>
+        </tr>
+        <tr>
+          <td>請求書番号　：</td>
+          <td><span id="invoice-no-field" style="font-size:9pt;">（発行時に自動付番）</span></td>
+        </tr>
+      </table>
+      <div class="company-name">
+        <input type="text" id="company-name" value="株式会社SMILE CREATE GROUP" style="font-size:12pt;font-weight:bold;width:100%;">
+      </div>
+      <div class="company-detail">
+        〒<input type="text" id="company-zip" value="101-0031" style="width:60px;"><br>
+        <input type="text" id="company-addr" value="東京都千代田区東神田1－14－13" style="width:100%;"><br>
+        <input type="text" id="company-building" value="カシムラビル" style="width:100%;"><br>
+        電話: <input type="text" id="company-tel" value="03-5829-9695" style="width:100px;"><br>
+        登録番号: <input type="text" id="company-reg" value="T9010001138417" style="width:120px;">
+      </div>
+    </div>
+  </div><!-- /header-columns -->
+
+  <!-- ご請求金額 -->
+  <div class="amount-box">
+    <div class="label">ご請求金額</div>
+    <div class="value" id="total-display">0円</div>
+  </div>
+
+  <!-- 振込情報 -->
+  <table class="payment-table">
+    <tr>
+      <td>振込期日</td>
+      <td><input type="date" id="due-date" style="width:140px;"></td>
+    </tr>
+    <tr>
+      <td rowspan="3">振込先</td>
+      <td><input type="text" id="bank-name" value="三菱UFJ銀行　京橋支店" style="width:220px;"></td>
+    </tr>
+    <tr>
+      <td>
+        <input type="text" id="bank-account-type" value="普通口座" style="width:60px;">
+        <input type="text" id="bank-account-no"   value="2896436"  style="width:80px;">
+      </td>
+    </tr>
+    <tr>
+      <td><input type="text" id="bank-holder" value="カ）スマイルクリエイトグループ" style="width:220px;"></td>
+    </tr>
+  </table>
+
+  <!-- ===== 入金一覧 ===== -->
+  <div class="section-title">入金一覧</div>
+  <table class="list-table" id="payment-list-table">
+    <thead>
+      <tr>
+        <th class="col-date">日付</th>
+        <th class="col-detail">詳細</th>
+        <th class="col-qty">数量</th>
+        <th class="col-price">単価(税込)</th>
+        <th class="col-amount">金額(税込)</th>
+      </tr>
+    </thead>
+    <tbody id="payment-rows">
+      <!-- 初期5空行 -->
+      <tr><td></td><td></td><td></td><td class="right"></td><td class="right"></td></tr>
+      <tr><td></td><td></td><td></td><td class="right"></td><td class="right"></td></tr>
+      <tr><td></td><td></td><td></td><td class="right"></td><td class="right"></td></tr>
+      <tr><td></td><td></td><td></td><td class="right"></td><td class="right"></td></tr>
+      <tr><td></td><td></td><td></td><td class="right"></td><td class="right"></td></tr>
+    </tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4" class="right">合計(税込)</td>
+        <td class="right">-</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <!-- ===== 請求一覧 ===== -->
+  <div class="section-title">請求一覧</div>
+  <button class="add-row-btn" onclick="addInvoiceRow()">＋ 行追加</button>
+  <table class="list-table" id="invoice-list-table">
+    <thead>
+      <tr>
+        <th class="col-date">日付</th>
+        <th class="col-detail">詳細</th>
+        <th class="col-tax">税率</th>
+        <th class="col-qty">数量</th>
+        <th class="col-price">単価(税込)</th>
+        <th class="col-amount">金額(税込)</th>
+        <th class="add-row-btn" style="border:none;background:transparent;width:24px;"></th>
+      </tr>
+    </thead>
+    <tbody id="invoice-rows">
+      <!-- JS で初期行を挿入 -->
+    </tbody>
+    <!-- 空白行(見た目用) -->
+    <tbody id="invoice-empty-rows"></tbody>
+  </table>
+
+  <!-- ===== 税率区分 & 合計 ===== -->
+  <div class="bottom-tables">
+    <!-- 左: 税率区分 -->
+    <table class="tax-summary-table">
+      <thead>
+        <tr>
+          <th>税率区分</th>
+          <th>対象金額(税込)</th>
+          <th>内 消費税額</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>10%対象</td>
+          <td class="right" id="tax10-base">0</td>
+          <td class="right" id="tax10-amount">0</td>
+        </tr>
+        <tr>
+          <td>8%対象</td>
+          <td class="right" id="tax8-base">-</td>
+          <td class="right" id="tax8-amount">-</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- 右: 消費税・合計 -->
+    <table class="total-table">
+      <tr>
+        <td>消費税</td>
+        <td id="total-tax">0</td>
+      </tr>
+      <tr>
+        <td>合計(税込)</td>
+        <td id="grand-total">0</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ===== 備考欄 ===== -->
+  <div class="note-box">
+    <div class="note-label">備考欄</div>
+    <textarea id="note" rows="2" style="width:100%;resize:vertical;min-height:36px;">恐れ入りますが、振込手数料は御社のご負担とさせていただきます。
+ご確認を何卒よろしくお願い申し上げます。</textarea>
+  </div>
+
+</div><!-- /#invoice -->
+</div><!-- /.page-wrapper -->
+
+<script>
+/* =====================================================
+   定数・初期設定
+===================================================== */
+const STORAGE_KEY_SEQ = 'invoice_seq'; // ローカルストレージのキー（連番）
+const SEQ_PREFIX      = 'P518-00-46156-'; // 請求番号プレフィックス
+
+/* =====================================================
+   請求番号管理
+   - ローカルストレージで連番を永続化
+   - 発行ごとに +1
+===================================================== */
+function getNextInvoiceNo() {
+  // 現在の連番を取得 (初回は 13)
+  let seq = parseInt(localStorage.getItem(STORAGE_KEY_SEQ) || '13', 10);
+  seq += 1;
+  localStorage.setItem(STORAGE_KEY_SEQ, seq);
+  // 2桁ゼロ埋め
+  return SEQ_PREFIX + String(seq).padStart(2, '0');
+}
+
+function peekCurrentSeq() {
+  return parseInt(localStorage.getItem(STORAGE_KEY_SEQ) || '13', 10);
+}
+
+/* =====================================================
+   請求行の動的追加・削除
+===================================================== */
+let invoiceRowCount = 0; // 行IDカウンタ
+
+/**
+ * 請求一覧に新しい入力行を追加する
+ * @param {Object} data - 既存データがあれば { date, detail, tax, qty, price }
+ */
+function addInvoiceRow(data = {}) {
+  const tbody = document.getElementById('invoice-rows');
+  const id    = ++invoiceRowCount;
+  const tr    = document.createElement('tr');
+  tr.dataset.id = id;
+
+  const taxOptions = ['10%', '8%', '0%'];
+  const taxSel = taxOptions.map(t =>
+    `<option value="${t}" ${(data.tax||'10%')===t?'selected':''}>${t}</option>`
+  ).join('');
+
+  tr.innerHTML = `
+    <td class="col-date">
+      <input type="text" class="row-date" value="${data.date||''}" placeholder="4/8" style="width:44px;">
+    </td>
+    <td class="col-detail">
+      <input type="text" class="row-detail" value="${data.detail||''}" placeholder="詳細を入力" style="width:100%;">
+    </td>
+    <td class="col-tax center">
+      <select class="row-tax" onchange="recalc()">${taxSel}</select>
+    </td>
+    <td class="col-qty center">
+      <input type="number" class="row-qty" value="${data.qty||1}" min="0" oninput="recalc()" style="width:36px;">
+    </td>
+    <td class="col-price right">
+      <input type="number" class="row-price" value="${data.price||''}" min="0" placeholder="0" oninput="recalc()" style="width:72px;">
+    </td>
+    <td class="col-amount right row-amount">0</td>
+    <td style="border:none;padding:0 2px;">
+      <button class="remove-row-btn" onclick="removeInvoiceRow(this)" title="削除">×</button>
+    </td>
+  `;
+  tbody.appendChild(tr);
+  recalc();
+}
+
+/**
+ * 行を削除する
+ */
+function removeInvoiceRow(btn) {
+  const tr = btn.closest('tr');
+  tr.remove();
+  recalc();
+}
+
+/* =====================================================
+   金額計算
+===================================================== */
+/**
+ * 全行の金額を再計算し、合計・消費税を更新する
+ */
+function recalc() {
+  const rows = document.querySelectorAll('#invoice-rows tr');
+  let total10 = 0; // 10%対象 合計
+  let total8  = 0; // 8%対象 合計
+
+  rows.forEach(tr => {
+    const qty   = parseFloat(tr.querySelector('.row-qty')?.value   || 0) || 0;
+    const price = parseFloat(tr.querySelector('.row-price')?.value || 0) || 0;
+    const tax   = tr.querySelector('.row-tax')?.value || '10%';
+    const amt   = Math.round(qty * price);
+    const cell  = tr.querySelector('.row-amount');
+    if (cell) cell.textContent = amt > 0 ? amt.toLocaleString() : '';
+
+    if (tax === '10%') total10 += amt;
+    else if (tax === '8%') total8 += amt;
+  });
+
+  // 消費税計算 (税込金額から逆算: 税額 = 税込 × 税率 / (1 + 税率))
+  const tax10 = Math.round(total10 * 10 / 110);
+  const tax8  = Math.round(total8  * 8  / 108);
+  const totalTax   = tax10 + tax8;
+  const grandTotal = total10 + total8;
+
+  // 税率区分テーブル
+  document.getElementById('tax10-base').textContent   = total10 > 0 ? total10.toLocaleString() : '-';
+  document.getElementById('tax10-amount').textContent  = tax10  > 0 ? tax10.toLocaleString()   : '-';
+  document.getElementById('tax8-base').textContent    = total8  > 0 ? total8.toLocaleString()  : '-';
+  document.getElementById('tax8-amount').textContent   = tax8   > 0 ? tax8.toLocaleString()    : '-';
+
+  // 右側合計
+  document.getElementById('total-tax').textContent  = totalTax.toLocaleString();
+  document.getElementById('grand-total').textContent = grandTotal.toLocaleString();
+
+  // ご請求金額（大きく表示）
+  document.getElementById('total-display').textContent = grandTotal.toLocaleString() + '円';
+}
+
+/* =====================================================
+   請求書発行
+   1. 請求番号を自動発行（ローカルストレージで+1）
+   2. 表示モードへ切り替え
+===================================================== */
+
+// 現在発行済みの請求番号を保持する変数（修正時に再利用）
+let issuedInvoiceNo = null;
+
+function issueInvoice() {
+  // バリデーション: 請求日が未入力なら今日をセット
+  if (!document.getElementById('issue-date').value) {
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('issue-date').value = today;
+  }
+
+  // 請求番号を新規発行（+1）して変数に保存
+  issuedInvoiceNo = getNextInvoiceNo();
+  document.getElementById('invoice-no-field').textContent = issuedInvoiceNo;
+
+  // コントロールパネルに番号表示
+  const disp = document.getElementById('invoice-no-display');
+  disp.textContent = '請求書番号: ' + issuedInvoiceNo;
+  disp.style.display = 'inline-block';
+
+  // 表示モードへ切り替え
+  switchToView();
+}
+
+/* =====================================================
+   モード切替
+===================================================== */
+
+/**
+ * 表示（印刷）モードへ切り替える
+ * @param {boolean} isModified - 修正版として表示する場合 true
+ */
+function switchToView(isModified = false) {
+  const invoice = document.getElementById('invoice');
+  invoice.classList.remove('editable');
+  invoice.classList.add('view-mode');
+
+  // ボタン表示制御
+  document.getElementById('btn-issue').style.display   = 'none';
+  document.getElementById('btn-print').style.display   = isModified ? 'none' : 'inline-block';
+  document.getElementById('btn-reprint').style.display = isModified ? 'inline-block' : 'none';
+  document.getElementById('btn-modify').style.display  = 'inline-block';
+  document.getElementById('btn-edit').style.display    = 'inline-block';
+  document.getElementById('modify-badge').style.display = 'none';
+
+  // フィールドを読み取り専用に
+  document.querySelectorAll('#invoice input, #invoice select, #invoice textarea')
+    .forEach(el => el.setAttribute('readonly', true));
+  document.querySelectorAll('#invoice select')
+    .forEach(el => el.setAttribute('disabled', true));
+}
+
+/**
+ * 修正編集モードへ切り替える
+ * - 発行済みの請求番号を保持したまま入力を再び編集可能にする
+ * - 連番は増加させない
+ */
+function switchToModify() {
+  const invoice = document.getElementById('invoice');
+  invoice.classList.add('editable');
+  invoice.classList.remove('view-mode');
+
+  // ボタン表示制御：修正版出力ボタンのみ表示、通常発行ボタンは非表示
+  document.getElementById('btn-issue').style.display    = 'none';   // 新規発行は不可
+  document.getElementById('btn-print').style.display    = 'none';
+  document.getElementById('btn-reprint').style.display  = 'inline-block'; // 修正版出力
+  document.getElementById('btn-modify').style.display   = 'none';
+  document.getElementById('btn-edit').style.display     = 'inline-block';
+  document.getElementById('modify-badge').style.display = 'inline-block'; // 修正中バッジ
+
+  // フィールドを再び編集可能に
+  document.querySelectorAll('#invoice input, #invoice textarea')
+    .forEach(el => el.removeAttribute('readonly'));
+  document.querySelectorAll('#invoice select')
+    .forEach(el => el.removeAttribute('disabled'));
+}
+
+/**
+ * 修正版を確定して印刷ダイアログを開く
+ * - 請求番号は発行済みのものを維持（新規採番しない）
+ * - 表示モードに切り替えてから印刷
+ */
+function applyModifyAndPrint() {
+  // 請求番号を発行済みのものに確定（変更されていないはずだが念のため上書き）
+  if (issuedInvoiceNo) {
+    document.getElementById('invoice-no-field').textContent = issuedInvoiceNo;
+  }
+
+  // 修正版として表示モードへ切り替え（印刷ボタンは修正版用のまま）
+  switchToView(true);
+
+  // 少し待ってから印刷ダイアログを表示（DOM更新を待つ）
+  setTimeout(() => window.print(), 100);
+}
+
+/**
+ * 新規編集モードへ戻る（発行済み番号をリセット・編集状態に）
+ * 「完全にやり直す」場合に使用
+ */
+function switchToEdit() {
+  if (issuedInvoiceNo) {
+    const ok = confirm(
+      '新規作成に戻すと、発行済みの請求番号（' + issuedInvoiceNo + '）は破棄されます。\n' +
+      '次回発行時に新しい番号が採番されます。\n\n本当に戻しますか？'
+    );
+    if (!ok) return;
+    issuedInvoiceNo = null;
+  }
+
+  const invoice = document.getElementById('invoice');
+  invoice.classList.add('editable');
+  invoice.classList.remove('view-mode');
+
+  // 請求番号フィールドをリセット
+  document.getElementById('invoice-no-field').textContent = '（発行時に自動付番）';
+  document.getElementById('invoice-no-display').style.display = 'none';
+  document.getElementById('modify-badge').style.display = 'none';
+
+  // ボタンを初期状態に
+  document.getElementById('btn-issue').style.display   = 'inline-block';
+  document.getElementById('btn-print').style.display   = 'none';
+  document.getElementById('btn-reprint').style.display = 'none';
+  document.getElementById('btn-modify').style.display  = 'none';
+  document.getElementById('btn-edit').style.display    = 'none';
+
+  // フィールドを編集可能に
+  document.querySelectorAll('#invoice input, #invoice textarea')
+    .forEach(el => el.removeAttribute('readonly'));
+  document.querySelectorAll('#invoice select')
+    .forEach(el => el.removeAttribute('disabled'));
+}
+
+/* =====================================================
+   初期化
+===================================================== */
+(function init() {
+  // 今日の日付を発行日にセット
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('issue-date').value = today;
+
+  // デフォルト振込期日: 翌月15日
+  const due = new Date();
+  due.setMonth(due.getMonth() + 1);
+  due.setDate(15);
+  document.getElementById('due-date').value = due.toISOString().split('T')[0];
+
+  // サンプル行2行（PDFと同じ内容）
+  addInvoiceRow({ date: '4/8',  detail: '央優会様 チケットご利用代金(富澤 あす香様)', tax: '10%', qty: 1, price: 5500 });
+  addInvoiceRow({ date: '4/28', detail: '央優会様 チケットご利用代金(渡辺　僚子様)',  tax: '10%', qty: 1, price: 5500 });
+
+  // 現在の連番を表示
+  console.log('現在の連番:', peekCurrentSeq());
+})();
+</script>
+</body>
+</html>
